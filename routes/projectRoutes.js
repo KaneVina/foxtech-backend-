@@ -115,6 +115,12 @@ router.get(
   verifyToken,
   ctrl.getSonarResults,
 );
+// Gán kết quả scan vào UC theo commit hash
+router.put(
+  "/tasks/:taskId/sonarqube/results/:resultId/assign",
+  verifyToken,
+  ctrl.assignSonarResult,
+);
 
 // ─── Workload ─────────────────────────────────────────────────
 router.get("/tasks/:taskId/workload-stats", verifyToken, ctrl.getWorkloadStats);

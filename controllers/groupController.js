@@ -13,8 +13,8 @@ const emailService = require("../utils/emailService");
 exports.getSubjects = async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT "SubjectCode", "SubjectName", "SubjectNameVN" 
-      FROM "Subjects" 
+      SELECT "SubjectCode", "SubjectName", "SubjectNameVN"
+      FROM "Subjects"
       ORDER BY "SubjectCode" ASC
     `);
     res.status(200).json(result.rows);
@@ -41,8 +41,8 @@ exports.searchLecturers = async (req, res) => {
       SELECT "Id", "Name", "Email", "LecturerCode", "UniversityId"
       FROM "Lecturers"
       WHERE (
-        "Name" ILIKE $1 
-        OR "LecturerCode" ILIKE $1 
+        "Name" ILIKE $1
+        OR "LecturerCode" ILIKE $1
         OR CAST("UniversityId" AS VARCHAR) LIKE $1
       )
       AND "IsActive" = true
@@ -92,8 +92,8 @@ exports.createGroup = async (req, res) => {
 
     await pool.query(
       `INSERT INTO "GroupRequests" (
-        "GroupName", "SubjectCode", "Description", "CreatedBy", "Status", 
-        "ClassName", "Semester", "GroupNumber", "TermNumber", "MemberEmails", 
+        "GroupName", "SubjectCode", "Description", "CreatedBy", "Status",
+        "ClassName", "Semester", "GroupNumber", "TermNumber", "MemberEmails",
         "NewAccountRequestsJson", "CreatedAt"
       )
       VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $8, $9, $10, NOW())`,
@@ -188,7 +188,7 @@ exports.addMember = async (req, res) => {
         [req.user.id],
       );
       const addedByName = addedByRes.rows[0]?.Name || "Leader";
-      const groupUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/group/${groupId}`;
+      const groupUrl = `${process.env.FRONTEND_URL}/group/${groupId}`;
 
       emailService.sendMemberAddedEmail({
         userId,
@@ -241,9 +241,9 @@ exports.getMyGroups = async (req, res) => {
   try {
     const result = await pool.query(
       `
-      SELECT 
-        g.*, 
-        s."SubjectName", 
+      SELECT
+        g.*,
+        s."SubjectName",
         gm."GroupRole",
         (SELECT COUNT(*) FROM "GroupMembers" WHERE "GroupId" = g."Id") AS "MemberCount"
       FROM "Groups" g
@@ -270,22 +270,22 @@ exports.getMembers = async (req, res) => {
   try {
     const groupId = req.params.groupId;
     const result = await pool.query(
-      `SELECT 
-        u."Id", u."Name", u."Email", u."Phone", u."DOB", u."Gender", 
+      `SELECT
+        u."Id", u."Name", u."Email", u."Phone", u."DOB", u."Gender",
         u."CurrentTerm", u."AvatarUrl", u."MemberCode", u."StudentId",
-        m."Name" as "MajorName", 
-        uni."Name" as "UniversityName", 
+        m."Name" as "MajorName",
+        uni."Name" as "UniversityName",
         gm."GroupRole", gm."JoinedAt"
       FROM "Users" u
       JOIN "GroupMembers" gm ON u."Id" = gm."UserId"
       LEFT JOIN "Majors" m ON u."MajorId" = m."Id"
       LEFT JOIN "Universities" uni ON u."UniversityId" = uni."Id"
       WHERE gm."GroupId" = $1
-      ORDER BY 
-        CASE gm."GroupRole" 
-          WHEN 'Leader' THEN 1 
-          WHEN 'Action Leader' THEN 2 
-          ELSE 3 
+      ORDER BY
+        CASE gm."GroupRole"
+          WHEN 'Leader' THEN 1
+          WHEN 'Action Leader' THEN 2
+          ELSE 3
         END, u."Name" ASC`,
       [groupId],
     );
@@ -334,7 +334,7 @@ exports.sendInstantNotification = async (req, res) => {
         [req.user.id],
       );
       const senderName = senderRes.rows[0]?.Name || "Leader";
-      const groupUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/group/${groupId}`;
+      const groupUrl = `${process.env.FRONTEND_URL}/group/${groupId}`;
 
       emailService.sendGroupAnnouncementEmail({
         groupId,
@@ -406,7 +406,7 @@ exports.getGroupById = async (req, res) => {
 
     const groupRes = await pool.query(
       `
-      SELECT 
+      SELECT
         g.*, s."SubjectName", s."SubjectNameVN", l."Name" AS "LecturerName",
         l."Email" AS "LecturerEmail", l."LecturerCode" AS "LecturerCode"
       FROM "Groups" g
@@ -425,10 +425,10 @@ exports.getGroupById = async (req, res) => {
 
     const membersRes = await pool.query(
       `
-      SELECT 
-        u."Id", u."Name", u."Email", u."Phone", u."DOB", u."Gender", 
+      SELECT
+        u."Id", u."Name", u."Email", u."Phone", u."DOB", u."Gender",
         u."CurrentTerm", u."MemberCode", u."StudentId", u."AvatarUrl",
-        u."MajorId", u."UniversityId", m."Name" as "MajorName", 
+        u."MajorId", u."UniversityId", m."Name" as "MajorName",
         uni."Name" as "UniversityName", gm."GroupRole", gm."JoinedAt"
       FROM "GroupMembers" gm
       JOIN "Users" u ON gm."UserId" = u."Id"
@@ -558,7 +558,7 @@ exports.getMemberTasksInGroup = async (req, res) => {
     const { groupId, userId } = req.params;
     const result = await pool.query(
       `
-      SELECT 
+      SELECT
         ta."Id" AS "AssignmentId", ta."Viewed", ta."Completed", ta."Note",
         t."Id" AS "TaskId", t."Content", t."TaskCode", t."Deadline", t."Status"
       FROM "TaskAssignments" ta

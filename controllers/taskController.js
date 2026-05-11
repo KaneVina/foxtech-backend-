@@ -246,11 +246,12 @@ exports.createTask = async (req, res) => {
       }
 
       if (req.body.sendEmail !== false) {
-        emailService
-          .sendTaskCreatedEmail({
-            groupId, groupName, taskContent: content, taskCode,
-            deadline, creatorName, assigneeName, taskId,
-          })
+     emailService
+  .sendTaskCreatedEmail({
+    groupId, groupName, taskTitle: content, taskCode,
+    deadline, creatorName, assigneeName,
+    taskUrl: `${process.env.FRONTEND_URL}/group/${groupId}`,
+  })
           .catch((e) => console.error("[createTask] Email error:", e.message));
       }
     } catch (notifErr) {

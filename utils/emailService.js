@@ -109,7 +109,7 @@ function renderEmail({
     ? `
     <tr>
       <td style="padding:2px 0;font-size:12px;color:#6b7280;vertical-align:middle;">
-        <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTEiIGhlaWdodD0iMTEiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjNmI3MjgwIiBzdHJva2Utd2lkdGg9IjEuNSI+PHBhdGggZD0iTTIyIDE2LjkydjNhMiAyIDAgMDEtMi4xOCAyIDE5Ljc5IDE5Ljc5IDAgMDEtOC42My0zLjA3QTE5LjUgMTkuNSAwIDAwMy4wNyA5LjhhMTkuNzkgMTkuNzkgMCAwMS0zLjA3LTguNjNBMiAyIDAgMDEyIDBoM2EyIDIgMCAwMTIgMS43MmMuMTI3Ljk2LjM2MSAxLjkwMy43IDIuODFhMiAyIDAgMDEtLjQ1IDIuMTFMNi4wOSA3LjkxYTE2IDE2IDAgMDA2IDZsMS4yNy0xLjI3YTIgMiAwIDAxMi4xMS0uNDVjLjkwNy4zMzkgMS44NS41NzMgMi44MS43QTIgMiAwIDAxMjIgMTQuOTJ2MnoiLz48L3N2Zz4=" 
+        <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTEiIGhlaWdodD0iMTEiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjNmI3MjgwIiBzdHJva2Utd2lkdGg9IjEuNSI+PHBhdGggZD0iTTIyIDE2LjkydjNhMiAyIDAgMDEtMi4xOCAyIDE5Ljc5IDE5Ljc5IDAgMDEtOC42My0zLjA3QTE5LjUgMTkuNSAwIDAwMy4wNyA5LjhhMTkuNzkgMTkuNzkgMCAwMS0zLjA3LTguNjNBMiAyIDAgMDEyIDBoM2EyIDIgMCAwMTIgMS43MmMuMTI3Ljk2LjM2MSAxLjkwMy43IDIuODFhMiAyIDAgMDEtLjQ1IDIuMTFMNi4wOSA3LjkxYTE2IDE2IDAgMDA2IDZsMS4yNy0xLjI3YTIgMiAwIDAxMi4xMS0uNDVjLjkwNy4zMzkgMS44NS41NzMgMi44MS43QTIgMiAwIDAxMjIgMTQuOTJ2MnoiLz48L3N2Zz4="
              width="11" height="11" style="vertical-align:middle;margin-right:5px;opacity:0.5;"/>
         SĐT: ${senderPhone}
       </td>
@@ -444,7 +444,7 @@ exports.sendTaskCreatedEmail = async ({
       senderEmail: creatorEmail || "",
       note,
       ctaText: "Xem chi tiết nhiệm vụ",
-      ctaUrl: taskUrl || "#",
+      ctaUrl: taskUrl || buildGroupUrl(groupId, groupName),
       bodyHtml: `
         <p><strong>${creatorName}</strong> vừa tạo một nhiệm vụ mới
         trong nhóm <strong>${groupName}</strong>.</p>
@@ -523,7 +523,7 @@ exports.sendMemberAddedEmail = async ({
       senderRole: addedByRole || "Leader",
       senderEmail: addedByEmail || "",
       ctaText: "Vào nhóm ngay",
-      ctaUrl: groupUrl || "#",
+      ctaUrl: groupUrl || buildGroupUrl(groupId, groupName),
       bodyHtml: `
         <p><strong>${addedByName}</strong> đã thêm bạn vào nhóm học tập
         <strong>${groupName}</strong>.</p>
@@ -567,7 +567,7 @@ exports.sendGroupAnnouncementEmail = async ({
       senderEmail: senderEmail || "",
       note,
       ctaText: groupUrl ? "Xem nhóm" : undefined,
-      ctaUrl: groupUrl || undefined,
+      ctaUrl: groupUrl || buildGroupUrl(groupId, groupName),
       bodyHtml: `
         <p><strong>${senderName}</strong> — Leader nhóm <strong>${groupName}</strong>
         gửi thông báo:</p>
@@ -622,7 +622,7 @@ exports.sendDeadlineReminderEmail = async ({
       senderRole: "Nhắc nhở tự động",
       senderEmail: "noreply@foxtech.edu.vn",
       ctaText: "Xem nhiệm vụ",
-      ctaUrl: taskUrl || "#",
+      ctaUrl: taskUrl || buildGroupUrl(groupId, groupName),
       bodyHtml: `
         <p>Nhiệm vụ <strong>${taskTitle}</strong> trong nhóm
         <strong>${groupName}</strong> sắp đến hạn.</p>
@@ -685,7 +685,7 @@ exports.sendCodePushReviewEmail = async ({
       senderEmail: reviewerEmail || "",
       note,
       ctaText: "Xem UC",
-      ctaUrl: pushUrl || "#",
+      ctaUrl: pushUrl || buildGroupUrl(groupId, groupName),
       bodyHtml: `
         <p><strong>${reviewerName}</strong> vừa
         ${isApprove ? "phê duyệt" : "từ chối"} code push của bạn
@@ -771,7 +771,7 @@ exports.sendDocumentReviewEmail = async ({
       senderEmail: reviewerEmail || "",
       note,
       ctaText: "Xem tài liệu",
-      ctaUrl: docUrl || "#",
+      ctaUrl: docUrl || buildGroupUrl(groupId, groupName),
       bodyHtml: `
         <p><strong>${reviewerName}</strong> vừa
         ${isApprove ? "phê duyệt" : "yêu cầu chỉnh sửa"}
@@ -856,7 +856,7 @@ exports.sendUCCompletedEmail = async ({
       senderRole: "Tự động nghiệm thu",
       senderEmail: "noreply@foxtech.edu.vn",
       ctaText: "Xem UC",
-      ctaUrl: taskUrl || "#",
+      ctaUrl: taskUrl || buildGroupUrl(groupId, groupName),
       bodyHtml: `
         <p>UC <strong>${ucid} — ${ucTitle}</strong> thuộc nhóm
         <strong>${groupName}</strong> vừa vượt qua tất cả 3 cổng
@@ -1134,7 +1134,7 @@ exports.sendSonarQubeResultEmail = async ({
       senderRole: "Phân tích mã nguồn tự động",
       senderEmail: "noreply@foxtech.edu.vn",
       ctaText: "Xem báo cáo chi tiết",
-      ctaUrl: dashboardUrl || "#",
+      ctaUrl: dashboardUrl || buildGroupUrl(groupId, groupName),
       bodyHtml: `
         <p>Phân tích mã nguồn tự động cho dự án
         <strong>${projectKey}</strong>${branch ? ` nhánh <strong>${branch}</strong>` : ""}
@@ -1241,7 +1241,7 @@ exports.sendOverdueWarningEmail = async ({
       senderRole: "Cảnh báo tự động",
       senderEmail: "noreply@foxtech.edu.vn",
       ctaText: "Xem danh sách quá hạn",
-      ctaUrl: taskUrl || "#",
+      ctaUrl: taskUrl || buildGroupUrl(groupId, groupName),
       bodyHtml: `
         <p>Có <strong style="color:#ef4444;">${overdueItems.length} mục</strong>
         trong nhóm <strong>${groupName}</strong> đã quá deadline và chưa hoàn thành.</p>
@@ -1308,13 +1308,15 @@ exports.sendBulkReminderEmail = async ({
     }
     if (!emails.length) return;
 
+    const groupName = await getGroupName(groupId);
+
     const html = renderEmail({
       subject,
       senderName: senderName || "Hệ thống FoxTech",
       senderRole: senderRole || "Nhắc nhở",
       senderEmail: "noreply@foxtech.edu.vn",
       ctaText: ctaText || "Xem nhiệm vụ",
-      ctaUrl: ctaUrl || "#",
+      ctaUrl: ctaUrl || buildGroupUrl(groupId, groupName),
       bodyHtml,
     });
 
@@ -1344,7 +1346,7 @@ exports.sendNewAccountEmail = async ({
       senderRole: "Quản trị viên",
       senderEmail: "noreply@foxtech.edu.vn",
       ctaText: "Đăng nhập ngay",
-      ctaUrl: loginUrl || process.env.FRONTEND_URL || "#",
+      ctaUrl: loginUrl || `${process.env.FRONTEND_URL}/login`,
       bodyHtml: `
         <p>Tài khoản của bạn trên hệ thống <strong>FoxTech Academic</strong> đã được tạo thành công.</p>
         <table cellpadding="0" cellspacing="0" role="presentation"
