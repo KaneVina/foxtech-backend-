@@ -2208,3 +2208,20 @@ exports.sendIssueReminder = async (req, res) => {
     res.status(500).json({ success: false, message: "Lỗi server" });
   }
 };
+exports.assignSonarResult = async (req, res) => {
+  try {
+    const taskId = parseInt(req.params.taskId);
+    const resultId = parseInt(req.params.resultId);
+    const { scheduleId } = req.body;
+
+    await pool.query(
+      `UPDATE "SonarQubeResults" SET "ScheduleId" = $1 WHERE "Id" = $2 AND "TaskId" = $3`,
+      [scheduleId || null, resultId, taskId],
+    );
+
+    res.json({ success: true, message: "Đã gán kết quả SonarQube vào UC" });
+  } catch (err) {
+    console.error("assignSonarResult:", err);
+    res.status(500).json({ success: false, message: "Lỗi server" });
+  }
+};
