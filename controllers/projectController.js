@@ -5,6 +5,10 @@ const crypto = require("crypto");
 
 // ── Email service (fire-and-forget, không block response) ──
 const emailService = require("../utils/emailService");
+const {
+  createNotifications,
+  getGroupMemberIds,
+} = require("../utils/notificationHelper");
 
 function parseSafeDate(dateStr) {
   if (!dateStr) return null;
