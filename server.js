@@ -15,6 +15,7 @@ const server = http.createServer(app);
 const allowedOrigins = [
   "https://foxtech-frontend-nhjx.vercel.app",
   "https://foxtech-frontend.vercel.app",
+  "https://foxtech4u.vercel.app",
   "http://localhost:5173",
 ];
 
