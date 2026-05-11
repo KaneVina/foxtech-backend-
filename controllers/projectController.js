@@ -5,6 +5,7 @@ const crypto = require("crypto");
 
 // ── Email service (fire-and-forget, không block response) ──
 const emailService = require("../utils/emailService");
+const { buildGroupUrl, getGroupName } = require("../utils/groupUrl");
 const {
   createNotifications,
   getGroupMemberIds,
@@ -75,7 +76,8 @@ async function checkAndComplete(scheduleId) {
       );
       if (scRes.rows.length) {
         const sc = scRes.rows[0];
-        const taskUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/group/${sc.GroupId}/task/${sc.TaskId}`;
+        const groupName = await getGroupName(sc.GroupId);
+const taskUrl = buildGroupUrl(sc.GroupId, groupName);
         emailService.sendUCCompletedEmail({
           groupId: sc.GroupId,
           ucid: sc.UCID,
@@ -590,7 +592,8 @@ exports.createIssue = async (req, res) => {
         );
         if (scRes.rows.length && scRes.rows[0].OwnerId) {
           const sc = scRes.rows[0];
-          const issueUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/group/${sc.GroupId}/task/${sc.TaskId}`;
+          const groupName = await getGroupName(sc.GroupId);
+const issueUrl = buildGroupUrl(sc.GroupId, groupName);
           emailService.sendNewIssueEmail({
             ownerId: sc.OwnerId,
             groupId: sc.GroupId,
@@ -983,7 +986,8 @@ exports.reviewCodePush = async (req, res) => {
       );
       if (scRes.rows.length) {
         const sc = scRes.rows[0];
-        const pushUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/group/${sc.GroupId}/task/${sc.TaskId}`;
+        const groupName = await getGroupName(sc.GroupId);
+const pushUrl = buildGroupUrl(sc.GroupId, groupName);
         emailService.sendCodePushReviewEmail({
           pushedById: pushRes.rows[0].PushedById,
           groupId: sc.GroupId,
@@ -1312,7 +1316,8 @@ exports.reviewDocument = async (req, res) => {
           [reviewerId],
         );
         const reviewerName = reviewerRes.rows[0]?.Name || "Leader";
-        const docUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/group/${sc?.GroupId}/task/${sc?.TaskId}`;
+        const groupName = await getGroupName(sc?.GroupId);
+const docUrl = buildGroupUrl(sc?.GroupId, groupName);
 
         emailService.sendDocumentReviewEmail({
           createdById: doc.CreatedById,
@@ -2092,7 +2097,8 @@ exports.sendReminder = async (req, res) => {
         ? userIds.map(Number)
         : await getGroupMemberIds(sc.GroupId);
 
-    const taskUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/group/${sc.GroupId}/task/${sc.TaskId}`;
+    const groupName = await getGroupName(sc.GroupId);
+const taskUrl = buildGroupUrl(sc.GroupId, groupName);
     const customMsg =
       message?.trim() ||
       `Nhắc nhở: UC <strong>${sc.UCID} — ${sc.TaskTitle}</strong> cần được chú ý.`;
@@ -2165,7 +2171,8 @@ exports.sendIssueReminder = async (req, res) => {
           ? [issue.OwnerId]
           : await getGroupMemberIds(issue.GroupId);
 
-    const taskUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/group/${issue.GroupId}/task/${taskId}`;
+    const groupName = await getGroupName(issue.GroupId);
+const taskUrl = buildGroupUrl(issue.GroupId, groupName);
     const customMsg =
       message?.trim() ||
       `Nhắc nhở: Issue <strong>${issue.DefectId}</strong> cần được xử lý.`;
