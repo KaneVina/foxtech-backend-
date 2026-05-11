@@ -13,7 +13,8 @@ const server = http.createServer(app);
 
 // ── CORS origins ──────────────────────────────────────────────────────────────
 const allowedOrigins = [
-  "https://ten-app.vercel.app", // ← đổi thành domain thật
+  "https://foxtech-frontend-nhjx.vercel.app",
+  "https://foxtech-frontend.vercel.app",
   "http://localhost:5173",
 ];
 
