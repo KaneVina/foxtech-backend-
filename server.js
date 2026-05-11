@@ -14,6 +14,7 @@ const server = http.createServer(app);
 // ── CORS origins ──────────────────────────────────────────────────────────────
 const allowedOrigins = [
   "https://foxtech-frontend-nhjx.vercel.app",
+  "https://foxtech4u-ifejdxhki-foxtech.vercel.app",
   "https://foxtech-frontend.vercel.app",
   "https://foxtech4u.vercel.app",
   "http://localhost:5173",
