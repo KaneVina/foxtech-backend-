@@ -399,9 +399,9 @@ exports.updateSchedule = async (req, res) => {
         const gates = await checkAndComplete(scheduleId);
         if (!gates.allPassed) {
           const missing = [];
-          if (!gates.gate1) missing.push("chưa có code push được phê duyệt");
-          if (!gates.gate2) missing.push("vẫn còn lỗi chưa được khắc phục");
-          if (!gates.gate3) missing.push("tài liệu chưa được phê duyệt đầy đủ");
+       if (!gates.gate1) missing.push("vẫn còn lỗi kỹ thuật chưa hoàn thành");
+if (!gates.gate2) missing.push("vẫn còn lỗi tài liệu chưa hoàn thành");
+if (!gates.gate3) missing.push("SonarQube chưa đạt Quality Gate");
           return res.status(400).json({
             success: false,
             message: `Không thể chuyển sang trạng thái "Hoàn thành": ${missing.join("; ")}. Dùng nút "Duyệt thủ công" hoặc hoàn tất điều kiện nghiệm thu.`,
@@ -1608,7 +1608,10 @@ exports.handleSonarQubeWebhook = async (req, res) => {
       payload?.branch?.name ||
       payload?.properties?.["sonar.branch.name"] ||
       null;
-
+const commitHash =
+      payload?.revision ||
+      payload?.properties?.["sonar.analysis.scm.revision"] ||
+      null;
     if (!projectKey) {
       return res
         .status(400)
@@ -1669,8 +1672,8 @@ exports.handleSonarQubeWebhook = async (req, res) => {
          ("TaskId", "ScheduleId", "QualityStatus", "Branch",
           "BugCount", "VulnerabilityCount", "CodeSmellCount",
           "CoveragePercent", "DuplicationsPercent",
-          "RawPayload", "DashboardUrl", "ProjectKey", "CreatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+          "RawPayload", "DashboardUrl", "ProjectKey","CommitHash", "CreatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())
        RETURNING "Id"`,
       [
         taskId,
@@ -1685,6 +1688,7 @@ exports.handleSonarQubeWebhook = async (req, res) => {
         rawPayload,
         dashboardUrl,
         projectKey,
+         commitHash
       ],
     );
     const newId = insertRes.rows[0]?.Id;
@@ -2215,18 +2219,18 @@ const taskUrl = buildGroupUrl(issue.GroupId, groupName);
     res.status(500).json({ success: false, message: "Lỗi server" });
   }
 };
+
 exports.assignSonarResult = async (req, res) => {
   try {
     const taskId = parseInt(req.params.taskId);
-    const resultId = parseInt(req.params.resultId);
+    const { resultId } = req.params;
     const { scheduleId } = req.body;
-
     await pool.query(
-      `UPDATE "SonarQubeResults" SET "ScheduleId" = $1 WHERE "Id" = $2 AND "TaskId" = $3`,
-      [scheduleId || null, resultId, taskId],
+      `UPDATE "SonarQubeResults" SET "ScheduleId" = $1 WHERE "Id" = $2`,
+      [scheduleId, resultId, taskId]
     );
-
-    res.json({ success: true, message: "Đã gán kết quả SonarQube vào UC" });
+    if (scheduleId) await checkAndComplete(scheduleId);
+    res.json({ success: true });
   } catch (err) {
     console.error("assignSonarResult:", err);
     res.status(500).json({ success: false, message: "Lỗi server" });
