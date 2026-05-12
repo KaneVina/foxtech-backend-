@@ -109,7 +109,6 @@ const taskUrl = buildGroupUrl(sc.GroupId, groupName);
     } catch (err) {
       console.error("[checkAndComplete] Lỗi email/notif:", err.message);
     }
-  }
 
   return {
     gate1,
