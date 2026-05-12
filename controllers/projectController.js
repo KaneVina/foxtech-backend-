@@ -54,15 +54,23 @@ async function checkAndComplete(scheduleId) {
   const sonarRow = g3Res.rows[0] || null;
   const gate3 = sonarRow?.QualityStatus === "OK";
 
-  const allPassed = gate1 && gate2 && gate3;
+const allPassed = gate1 && gate2 && gate3;
 
-  if (allPassed) {
-    await pool.query(
-      `UPDATE "ProjectSchedules"
-       SET "Status" = 'Hoàn thành'
-       WHERE "Id" = $1 AND "Status" NOT IN ('Hoàn thành', 'Tạm miễn')`,
-      [scheduleId],
-    );
+if (allPassed) {
+  await pool.query(
+    `UPDATE "ProjectSchedules"
+     SET "Status" = 'Hoàn thành'
+     WHERE "Id" = $1 AND "Status" NOT IN ('Hoàn thành', 'Tạm miễn')`,
+    [scheduleId],
+  );
+} else {
+  await pool.query(
+    `UPDATE "ProjectSchedules"
+     SET "Status" = 'Chưa bắt đầu'
+     WHERE "Id" = $1 AND "Status" = 'Hoàn thành'`,
+    [scheduleId],
+  );
+}
 
     try {
       const scRes = await pool.query(
@@ -1403,9 +1411,9 @@ exports.getGateStatus = async (req, res) => {
     );
 
     const sonarHistory = await pool.query(
-      `SELECT "Id", "QualityStatus", "Branch", "BugCount", "VulnerabilityCount",
-              "CodeSmellCount", "CoveragePercent", "DuplicationsPercent",
-              "DashboardUrl", "CreatedAt"
+     `SELECT "Id", "QualityStatus", "Branch", "CommitHash", "BugCount", "VulnerabilityCount",
+        "CodeSmellCount", "CoveragePercent", "DuplicationsPercent",
+        "DashboardUrl", "CreatedAt"
        FROM "SonarQubeResults"
        WHERE "ScheduleId" = $1
        ORDER BY "CreatedAt" DESC
@@ -1578,169 +1586,6 @@ exports.getWebhookLogs = async (req, res) => {
   }
 };
 
-// ═══════════════════════════════════════════════════════════════
-// SONARQUBE WEBHOOK
-// ═══════════════════════════════════════════════════════════════
-
-exports.handleSonarQubeWebhook = async (req, res) => {
-  try {
-    const rawPayload = JSON.stringify(req.body);
-
-    const secret = process.env.SONARQUBE_WEBHOOK_SECRET || "";
-    if (secret) {
-      const signature = req.headers["x-sonar-webhook-hmac-sha256"] || "";
-      const expected = crypto
-        .createHmac("sha256", secret)
-        .update(rawPayload)
-        .digest("hex");
-      if (signature !== expected) {
-        return res
-          .status(401)
-          .json({ success: false, message: "Invalid signature" });
-      }
-    }
-
-    const payload = req.body;
-    const projectKey = payload?.project?.key || "";
-    const qualityGate = payload?.qualityGate;
-    const status = qualityGate?.status || "ERROR";
-    const branch =
-      payload?.branch?.name ||
-      payload?.properties?.["sonar.branch.name"] ||
-      null;
-const commitHash =
-      payload?.revision ||
-      payload?.properties?.["sonar.analysis.scm.revision"] ||
-      null;
-    if (!projectKey) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Missing project key" });
-    }
-
-    const cfgRes = await pool.query(
-      `SELECT "TaskId" FROM "SonarQubeConfigs" WHERE "ProjectKey" = $1`,
-      [projectKey],
-    );
-    if (!cfgRes.rows.length) {
-      console.warn(
-        `[SonarQube] Webhook nhận được nhưng không tìm thấy config cho projectKey="${projectKey}"`,
-      );
-      return res
-        .status(200)
-        .json({ success: true, message: "ProjectKey không khớp, bỏ qua." });
-    }
-    const taskId = cfgRes.rows[0].TaskId;
-
-    let bugCount = 0,
-      vulnCount = 0,
-      smellCount = 0;
-    let coveragePct = null,
-      dupPct = null;
-    const conditions = qualityGate?.conditions || [];
-    for (const c of conditions) {
-      const m = (c.metric || "").toLowerCase();
-      const v = parseFloat(c.value) || 0;
-      if (m === "bugs") bugCount = v;
-      if (m === "vulnerabilities") vulnCount = v;
-      if (m === "code_smells") smellCount = v;
-      if (m === "coverage") coveragePct = v;
-      if (m === "duplicated_lines_density") dupPct = v;
-    }
-
-    let scheduleId = null;
-    if (branch) {
-      const ucidMatch = branch.match(/([A-Z]+-\d+|UC[-_]\d+)/i);
-      const ucid = ucidMatch ? ucidMatch[1].toUpperCase() : branch;
-
-      const schedRes = await pool.query(
-        `SELECT "Id" FROM "ProjectSchedules"
-         WHERE "TaskId" = $1
-           AND (UPPER("UCID") = UPPER($2) OR UPPER("UCID") = UPPER($3))`,
-        [taskId, ucid, branch],
-      );
-      if (schedRes.rows.length) {
-        scheduleId = schedRes.rows[0].Id;
-      }
-    }
-
-    const serverUrl = payload?.serverUrl || "https://sonarcloud.io";
-    const dashboardUrl = `${serverUrl}/dashboard?id=${encodeURIComponent(projectKey)}`;
-
-    const insertRes = await pool.query(
-      `INSERT INTO "SonarQubeResults"
-         ("TaskId", "ScheduleId", "QualityStatus", "Branch",
-          "BugCount", "VulnerabilityCount", "CodeSmellCount",
-          "CoveragePercent", "DuplicationsPercent",
-          "RawPayload", "DashboardUrl", "ProjectKey","CommitHash", "CreatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())
-       RETURNING "Id"`,
-      [
-        taskId,
-        scheduleId || null,
-        status,
-        branch || null,
-        bugCount,
-        vulnCount,
-        smellCount,
-        coveragePct,
-        dupPct,
-        rawPayload,
-        dashboardUrl,
-        projectKey,
-         commitHash
-      ],
-    );
-    const newId = insertRes.rows[0]?.Id;
-
-    if (scheduleId) {
-      await checkAndComplete(scheduleId);
-    }
-
-    try {
-      const taskRes = await pool.query(
-        `SELECT t."GroupId", t."Title" AS "TaskName" FROM "Tasks" t WHERE t."Id" = $1`,
-        [taskId],
-      );
-      if (taskRes.rows.length) {
-        const { GroupId, TaskName } = taskRes.rows[0];
-        const memberIds = await getGroupMemberIds(GroupId);
-
-        const icon = status === "OK" ? "✅" : "❌";
-        const detail =
-          status === "OK"
-            ? "Không có lỗi nghiêm trọng, Quality Gate đạt."
-            : `Phát hiện: ${bugCount} bug, ${vulnCount} lỗ hổng, ${smellCount} code smell.`;
-
-        await createNotifications({
-          userIds: memberIds,
-          title: `SonarQube ${status === "OK" ? "Pass" : "Fail"}: ${projectKey}`,
-          message: `${icon} Phân tích mã nguồn ${branch ? `nhánh <strong>${branch}</strong>` : ""} — ${detail} <a href="${dashboardUrl}" target="_blank">Xem chi tiết</a>`,
-          type: "alert",
-          category: "task",
-          groupId: GroupId,
-          senderId: null,
-          referenceId: taskId,
-          skipSelf: false,
-        });
-      }
-    } catch (notifErr) {
-      console.error("[SonarQube] Notification error:", notifErr.message);
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "SonarQube result saved",
-      id: newId,
-      status,
-      scheduleId,
-    });
-  } catch (err) {
-    console.error("handleSonarQubeWebhook:", err);
-    res.status(500).json({ success: false, message: "Lỗi server" });
-  }
-};
-
 exports.getSonarConfig = async (req, res) => {
   try {
     const taskId = parseInt(req.params.taskId);
@@ -1797,9 +1642,9 @@ exports.getSonarResults = async (req, res) => {
     let result;
     if (scheduleId) {
       result = await pool.query(
-        `SELECT "Id", "QualityStatus", "Branch", "BugCount", "VulnerabilityCount",
-                "CodeSmellCount", "CoveragePercent", "DuplicationsPercent",
-                "DashboardUrl", "RawPayload", "CreatedAt"
+       `SELECT "Id", "QualityStatus", "Branch", "CommitHash", "BugCount", "VulnerabilityCount",
+        "CodeSmellCount", "CoveragePercent", "DuplicationsPercent",
+        "DashboardUrl", "ScheduleId", "CreatedAt"
          FROM "SonarQubeResults"
          WHERE "ScheduleId" = $1
          ORDER BY "CreatedAt" DESC
@@ -2227,12 +2072,313 @@ exports.assignSonarResult = async (req, res) => {
     const { scheduleId } = req.body;
     await pool.query(
       `UPDATE "SonarQubeResults" SET "ScheduleId" = $1 WHERE "Id" = $2`,
-      [scheduleId, resultId, taskId]
+      [scheduleId, resultId]
     );
     if (scheduleId) await checkAndComplete(scheduleId);
     res.json({ success: true });
   } catch (err) {
     console.error("assignSonarResult:", err);
+    res.status(500).json({ success: false, message: "Lỗi server" });
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
+// FILE NÀY CHỨA 2 HÀM CẦN THAY THẾ TRONG projectController.js
+//
+// 1. handleSonarQubeWebhook  — tìm và thay toàn bộ hàm cũ
+// 2. assignSonarByHash       — tìm và thay toàn bộ hàm cũ
+//
+// THAY ĐỔI SO VỚI BẢN CŨ:
+//   [handleSonarQubeWebhook]
+//   - Fix regex: bắt được TC001, TC1.2, TC2.10 (cũ bỏ sót hết)
+//   - Fix commitHash: thêm fallback sonar.scm.revision
+//   - Auto-match UC: exact branch → extract UCID từ branch → null
+//   - Notification rõ hơn: báo khi chưa gán được UC
+//
+//   [assignSonarByHash]
+//   - Fix LIKE '%hash%' → LIKE 'hash%' (prefix match)
+//     Lý do: git hash luôn là prefix, LIKE %hash% có thể khớp nhầm
+//   - Cảnh báo log khi gán đè lên UC khác
+// ═══════════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────────
+// HELPER nội bộ — extract UCID từ branch name
+// Test cases:
+//   'TC1.2'               → 'TC1.2'
+//   'feature/TC001-login' → 'TC001'
+//   'TC2.10-payment'      → 'TC2.10'
+//   'hotfix/TC3.1'        → 'TC3.1'
+//   'main'                → null
+//   null                  → null
+// ─────────────────────────────────────────────────────────────
+function extractUCIDFromBranch(branch) {
+  if (!branch) return null;
+  const UCID_REGEX = /\b(TC\d+(?:\.\d+)?)\b/i;
+  const match = branch.match(UCID_REGEX);
+  return match ? match[1].toUpperCase() : null;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// HÀM 1: handleSonarQubeWebhook
+// ═══════════════════════════════════════════════════════════════
+exports.handleSonarQubeWebhook = async (req, res) => {
+  try {
+    const rawPayload = JSON.stringify(req.body);
+
+    // ── 1. Xác thực HMAC ────────────────────────────────────────
+    const secret = process.env.SONARQUBE_WEBHOOK_SECRET || "";
+    if (secret) {
+      const signature = req.headers["x-sonar-webhook-hmac-sha256"] || "";
+      const expected = crypto
+        .createHmac("sha256", secret)
+        .update(rawPayload)
+        .digest("hex");
+      if (signature !== expected) {
+        return res.status(401).json({ success: false, message: "Invalid signature" });
+      }
+    }
+
+    const payload   = req.body;
+    const projectKey = payload?.project?.key || "";
+    const qualityGate = payload?.qualityGate;
+    const status    = qualityGate?.status || "ERROR";
+
+    // SonarQube gửi branch name qua nhiều field tuỳ version/edition
+    const branch =
+      payload?.branch?.name ||
+      payload?.properties?.["sonar.branch.name"] ||
+      null;
+
+    // FIX: thêm fallback sonar.scm.revision (SonarQube Community edition)
+    const commitHash =
+      payload?.revision ||
+      payload?.properties?.["sonar.analysis.scm.revision"] ||
+      payload?.properties?.["sonar.scm.revision"] ||
+      null;
+
+    if (!projectKey) {
+      return res.status(400).json({ success: false, message: "Missing project key" });
+    }
+
+    // ── 2. Tìm TaskId theo projectKey ───────────────────────────
+    const cfgRes = await pool.query(
+      `SELECT "TaskId" FROM "SonarQubeConfigs" WHERE "ProjectKey" = $1`,
+      [projectKey],
+    );
+    if (!cfgRes.rows.length) {
+      console.warn(`[SonarQube] Webhook nhận nhưng không tìm thấy config cho projectKey="${projectKey}"`);
+      return res.status(200).json({ success: true, message: "ProjectKey không khớp, bỏ qua." });
+    }
+    const taskId = cfgRes.rows[0].TaskId;
+
+    // ── 3. Parse metrics từ quality gate conditions ──────────────
+    let bugCount = 0, vulnCount = 0, smellCount = 0;
+    let coveragePct = null, dupPct = null;
+    for (const c of qualityGate?.conditions || []) {
+      const m = (c.metric || "").toLowerCase();
+      const v = parseFloat(c.value) || 0;
+      if (m === "bugs")                     bugCount    = v;
+      if (m === "vulnerabilities")          vulnCount   = v;
+      if (m === "code_smells")              smellCount  = v;
+      if (m === "coverage")                 coveragePct = v;
+      if (m === "duplicated_lines_density") dupPct      = v;
+    }
+
+    // ── 4. Auto-match UC từ branch name ─────────────────────────
+    // Ưu tiên:
+    //   B1: exact match branch === UCID  (VD: branch "TC1.2" → UC TC1.2)
+    //   B2: extract UCID từ branch       (VD: "feature/TC001-login" → UC TC001)
+    //   B3: null → user tự gán bằng commit hash sau
+    let scheduleId = null;
+    let autoMatchLog = "Không có branch";
+
+    if (branch) {
+      // B1: exact match
+      const exactRes = await pool.query(
+        `SELECT "Id" FROM "ProjectSchedules"
+         WHERE "TaskId" = $1 AND UPPER("UCID") = UPPER($2)
+         LIMIT 1`,
+        [taskId, branch],
+      );
+      if (exactRes.rows.length) {
+        scheduleId   = exactRes.rows[0].Id;
+        autoMatchLog = `Exact match branch="${branch}" → scheduleId=${scheduleId}`;
+      } else {
+        // B2: extract UCID từ branch
+        const extractedUCID = extractUCIDFromBranch(branch);
+        if (extractedUCID) {
+          const extractRes = await pool.query(
+            `SELECT "Id" FROM "ProjectSchedules"
+             WHERE "TaskId" = $1 AND UPPER("UCID") = $2
+             LIMIT 1`,
+            [taskId, extractedUCID],
+          );
+          if (extractRes.rows.length) {
+            scheduleId   = extractRes.rows[0].Id;
+            autoMatchLog = `Extract "${extractedUCID}" từ branch="${branch}" → scheduleId=${scheduleId}`;
+          } else {
+            autoMatchLog = `Extract "${extractedUCID}" từ branch="${branch}" nhưng không tìm thấy UC tương ứng`;
+          }
+        } else {
+          autoMatchLog = `Không extract được UCID từ branch="${branch}"`;
+        }
+      }
+    }
+
+    console.log(`[SonarQube] Auto-match: ${autoMatchLog}`);
+
+    // ── 5. Lưu kết quả vào DB ────────────────────────────────────
+    const serverUrl    = payload?.serverUrl || "https://sonarcloud.io";
+    const dashboardUrl = `${serverUrl}/dashboard?id=${encodeURIComponent(projectKey)}`;
+
+    const insertRes = await pool.query(
+      `INSERT INTO "SonarQubeResults"
+         ("TaskId", "ScheduleId", "QualityStatus", "Branch", "CommitHash",
+          "BugCount", "VulnerabilityCount", "CodeSmellCount",
+          "CoveragePercent", "DuplicationsPercent",
+          "RawPayload", "DashboardUrl", "ProjectKey", "CreatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())
+       RETURNING "Id"`,
+      [
+        taskId,
+        scheduleId || null,
+        status,
+        branch || null,
+        commitHash || null,
+        bugCount, vulnCount, smellCount,
+        coveragePct, dupPct,
+        rawPayload,
+        dashboardUrl,
+        projectKey,
+      ],
+    );
+    const newId = insertRes.rows[0]?.Id;
+
+    // ── 6. Trigger gate check nếu đã khớp UC ─────────────────────
+    if (scheduleId) {
+      await checkAndComplete(scheduleId);
+    }
+
+    // ── 7. Notification cho nhóm ────────────────────────────────
+    try {
+      const taskRes = await pool.query(
+        `SELECT t."GroupId" FROM "Tasks" t WHERE t."Id" = $1`,
+        [taskId],
+      );
+      if (taskRes.rows.length) {
+        const { GroupId } = taskRes.rows[0];
+        const memberIds   = await getGroupMemberIds(GroupId);
+
+        const icon   = status === "OK" ? "✅" : "❌";
+        const detail = status === "OK"
+          ? "Không có lỗi nghiêm trọng, Quality Gate đạt."
+          : `Phát hiện: ${bugCount} bug, ${vulnCount} lỗ hổng, ${smellCount} code smell.`;
+
+        // Thông báo rõ khi chưa gán được UC — user biết để vào gán thủ công
+        const assignNote = scheduleId
+          ? ""
+          : " ⚠️ Chưa xác định được UC — vào tab SonarQube để gán thủ công bằng commit hash.";
+
+        await createNotifications({
+          userIds:     memberIds,
+          title:       `SonarQube ${status === "OK" ? "Pass" : "Fail"}: ${projectKey}`,
+          message:     `${icon} ${branch ? `Nhánh <strong>${branch}</strong> — ` : ""}${detail}${assignNote} <a href="${dashboardUrl}" target="_blank">Xem chi tiết</a>`,
+          type:        "alert",
+          category:    "task",
+          groupId:     GroupId,
+          senderId:    null,
+          referenceId: taskId,
+          skipSelf:    false,
+        });
+      }
+    } catch (notifErr) {
+      console.error("[SonarQube] Notification error:", notifErr.message);
+    }
+
+    res.status(200).json({
+      success:     true,
+      message:     scheduleId
+        ? `SonarQube result saved và đã tự gán vào UC (scheduleId=${scheduleId}).`
+        : "SonarQube result saved. Chưa khớp UC — cần gán thủ công bằng commit hash.",
+      id:          newId,
+      status,
+      scheduleId,
+      autoMatched: !!scheduleId,
+    });
+  } catch (err) {
+    console.error("handleSonarQubeWebhook:", err);
+    res.status(500).json({ success: false, message: "Lỗi server" });
+  }
+};
+
+
+// ═══════════════════════════════════════════════════════════════
+// HÀM 2: assignSonarByHash
+// ═══════════════════════════════════════════════════════════════
+exports.assignSonarByHash = async (req, res) => {
+  try {
+    const taskId     = parseInt(req.params.taskId);
+    const scheduleId = parseInt(req.params.scheduleId);
+    const { commitHash } = req.body;
+
+    // ── Validate ─────────────────────────────────────────────────
+    if (!commitHash || commitHash.trim().length < 7) {
+      return res.status(400).json({
+        success: false,
+        message: "Commit hash phải có ít nhất 7 ký tự.",
+      });
+    }
+
+    const hash = commitHash.trim().toLowerCase();
+
+    // FIX: dùng prefix match "hash%" thay vì "%hash%"
+    // Git hash luôn là prefix — "abc1234" là 7 ký tự đầu của "abc1234def456..."
+    // LIKE '%hash%' có thể khớp nhầm nếu hash xuất hiện ở giữa chuỗi khác
+    const result = await pool.query(
+      `SELECT "Id", "QualityStatus", "Branch", "CommitHash",
+              "BugCount", "VulnerabilityCount", "CodeSmellCount",
+              "ScheduleId"
+       FROM "SonarQubeResults"
+       WHERE "TaskId" = $1
+         AND LOWER("CommitHash") LIKE $2
+       ORDER BY "CreatedAt" DESC
+       LIMIT 1`,
+      [taskId, `${hash}%`],  // prefix match
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: `Không tìm thấy scan nào với commit hash bắt đầu bằng "${commitHash}". ` +
+                 `Kiểm tra lại hash hoặc chờ SonarQube webhook gửi kết quả về.`,
+      });
+    }
+
+    const scan = result.rows[0];
+
+    // Log cảnh báo nếu scan này đang gán cho UC khác (không block, vẫn cho gán đè)
+    if (scan.ScheduleId && scan.ScheduleId !== scheduleId) {
+      console.warn(
+        `[assignSonarByHash] Scan ${scan.Id} (hash: ${scan.CommitHash?.slice(0, 10)}) ` +
+        `đang gán cho scheduleId=${scan.ScheduleId}, ghi đè bằng scheduleId=${scheduleId}`,
+      );
+    }
+
+    // ── Gán vào UC ───────────────────────────────────────────────
+    await pool.query(
+      `UPDATE "SonarQubeResults" SET "ScheduleId" = $1 WHERE "Id" = $2`,
+      [scheduleId, scan.Id],
+    );
+
+    await checkAndComplete(scheduleId);
+
+    res.json({
+      success: true,
+      message: `Đã gán scan (${scan.QualityStatus}) của commit ${scan.CommitHash?.slice(0, 10)} vào UC này.`,
+      data:    scan,
+    });
+  } catch (err) {
+    console.error("assignSonarByHash:", err);
     res.status(500).json({ success: false, message: "Lỗi server" });
   }
 };

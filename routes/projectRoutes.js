@@ -151,5 +151,9 @@ router.delete("/upload/file", verifyToken, uploadCtrl.deleteFile);
 router.post("/webhook/github", ctrl.handleGithubWebhook);
 // SonarQube: bảo mật bằng SONARQUBE_WEBHOOK_SECRET
 router.post("/webhook/sonarqube", ctrl.handleSonarQubeWebhook);
-
+router.put(
+  "/tasks/:taskId/schedules/:scheduleId/sonarqube/assign-by-hash",
+  verifyToken,
+  ctrl.assignSonarByHash,
+);
 module.exports = router;
