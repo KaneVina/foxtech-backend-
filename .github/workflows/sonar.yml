@@ -30,7 +30,7 @@ jobs:
 
       - name: Notify FoxTech Backend
         run: |
-          curl -X POST https://foxtech-frontend-nhjx.vercel.app/api/projects/webhook/sonarqube \
+          curl -X POST https://foxtech-backend.onrender.com/api/projects/webhook/sonarqube \
             -H "Content-Type: application/json" \
             -d "{
               \"project\": { \"key\": \"KaneVina_foxtech-backend-\" },
