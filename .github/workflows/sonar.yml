@@ -8,20 +8,21 @@ jobs:
   sonar:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+        uses: SonarSource/sonarqube-scan-action@v5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io
 
       - name: Get Quality Gate Status
         id: quality_gate
         run: |
-          sleep 5
+          sleep 10
           STATUS=$(curl -s -u ${{ secrets.SONAR_TOKEN }}: \
             "https://sonarcloud.io/api/qualitygates/project_status?projectKey=KaneVina_foxtech-backend-" \
             | python3 -c "import sys,json; print(json.load(sys.stdin)['projectStatus']['status'])")
