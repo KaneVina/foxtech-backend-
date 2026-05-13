@@ -1,0 +1,39 @@
+name: SonarCloud + Notify FoxTech
+
+on:
+  push:
+    branches: ["**"]
+
+jobs:
+  sonar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Get Quality Gate Status
+        id: quality_gate
+        run: |
+          sleep 5
+          STATUS=$(curl -s -u ${{ secrets.SONAR_TOKEN }}: \
+            "https://sonarcloud.io/api/qualitygates/project_status?projectKey=KaneVina_foxtech-backend-" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['projectStatus']['status'])")
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+
+      - name: Notify FoxTech Backend
+        run: |
+          curl -X POST https://foxtech-frontend-nhjx.vercel.app/api/projects/webhook/sonarqube \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"project\": { \"key\": \"KaneVina_foxtech-backend-\" },
+              \"qualityGate\": { \"status\": \"${{ steps.quality_gate.outputs.status }}\" },
+              \"revision\": \"${{ github.sha }}\",
+              \"branch\": { \"name\": \"${{ github.ref_name }}\" }
+            }"
