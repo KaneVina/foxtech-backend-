@@ -84,17 +84,17 @@ connectDB();
 app.use("/api/auth/login",    loginLimiter); // ← phải trước authRoutes
 app.use("/api/auth",          require("./routes/authRoutes"));
 app.use("/api/groups",        require("./routes/groupRoutes"));
-app.use("/api/tasks",         require("./routes/taskRoutes"));
 app.use("/api/resources",     require("./routes/resourceRoutes"));
 app.use("/api/requests",      require("./routes/requestRoutes"));
 app.use("/api/users",         require("./routes/userRoutes"));
 app.use("/api/notifications", require("./routes/notificationRoutes"));
 app.use("/api/metadata",      require("./routes/metadataRoutes"));
-app.use("/api",               require("./routes/projectRoutes"));
 app.use("/api/admin",         require("./routes/adminRoutes"));
 app.use("/api/courses",       require("./routes/courseRoutes"));
 app.use("/api/exam-sessions", require("./routes/examSessionRoutes"));
 app.use("/api/upload",        require("./routes/uploadRoutes"));
+app.use("/api",               require("./routes/projectRoutes")); // ← PHẢI trước taskRoutes
+app.use("/api/tasks",         require("./routes/taskRoutes"));    // ← xuống cuối
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => res.json({ status: "ok" }));
