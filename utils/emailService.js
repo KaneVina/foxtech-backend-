@@ -45,9 +45,19 @@ async function getGroupName(groupId) {
 }
 
 function formatSentAt() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())} · ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    hour: "2-digit",
+    minute: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour12: false,
+  }).formatToParts(now);
+
+  const get = (type) => parts.find((p) => p.type === type)?.value ?? "00";
+  return `${get("hour")}:${get("minute")} · ${get("day")}/${get("month")}/${get("year")}`;
 }
 
 // ═══════════════════════════════════════════════════════════════
