@@ -30,11 +30,9 @@ jobs:
 
       - name: Notify FoxTech Backend
         run: |
+          PAYLOAD="{\"project\":{\"key\":\"KaneVina_foxtech-backend-\"},\"qualityGate\":{\"status\":\"${{ steps.quality_gate.outputs.status }}\"},\"revision\":\"${{ github.sha }}\",\"branch\":{\"name\":\"${{ github.ref_name }}\"}}"
+          SIG=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "${{ secrets.SONARQUBE_WEBHOOK_SECRET }}" | sed 's/.*= //')
           curl -X POST https://foxtech-backend.onrender.com/api/webhook/sonarqube \
             -H "Content-Type: application/json" \
-            -d "{
-              \"project\": { \"key\": \"KaneVina_foxtech-backend-\" },
-              \"qualityGate\": { \"status\": \"${{ steps.quality_gate.outputs.status }}\" },
-              \"revision\": \"${{ github.sha }}\",
-              \"branch\": { \"name\": \"${{ github.ref_name }}\" }
-            }"
+            -H "x-sonar-webhook-hmac-sha256: $SIG" \
+            -d "$PAYLOAD"
