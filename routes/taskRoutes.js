@@ -17,7 +17,6 @@ router.post("/:taskId/options", verifyToken, taskController.addPollOption);
 router.put("/:taskId/close-poll", verifyToken, taskController.closePoll);
 router.post("/:taskId/remind", verifyToken, taskController.remindTask);
 router.put("/:taskId/attendance-report", verifyToken, taskController.updateAttendanceReport);
-router.get("/:taskId/attendance-report/parse", verifyToken, taskController.parseAttendanceReport);
-router.post("/:taskId/checkout", verifyToken, taskController.checkoutMeeting);
+router.post("/:taskId/attendance-csv", verifyToken, taskController.uploadAttendanceCsv);
 router.get("/:taskId/meeting-attendances", verifyToken, taskController.getMeetingAttendances);
 module.exports = router;
