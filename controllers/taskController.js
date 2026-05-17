@@ -877,58 +877,69 @@ exports.parseAttendanceReport = async (req, res) => {
     if (MeetingCheckedOut)
       return res.status(400).json({ success: false, message: "Cuộc họp này đã được checkout rồi" });
 
-    // Fetch HTML từ URL
+    // Trang meet-attendance-tracker.web.app là Firebase SPA
+    // Lấy vid từ URL rồi fetch thẳng Firestore REST API
+    let vid = null;
+    try {
+      const urlObj = new URL(AttendanceReportUrl);
+      vid = urlObj.searchParams.get("vid");
+    } catch (_) {}
+
+    if (!vid)
+      return res.status(400).json({ success: false, message: "Không tìm thấy report ID (vid) trong URL báo cáo" });
+
     const fetch = require("node-fetch");
-    const response = await fetch(AttendanceReportUrl, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      timeout: 10000,
-    });
-    if (!response.ok)
-      return res.status(502).json({ success: false, message: `Không thể tải báo cáo: HTTP ${response.status}` });
 
-    const html = await response.text();
+    // Firestore REST endpoint của meet-attendance-tracker
+    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/meet-attendance-tracker/databases/(default)/documents/attendanceReports/${vid}`;
+    const fireResp = await fetch(firestoreUrl, { timeout: 10000 });
 
-    // Parse bảng Participant's List
-    // Tìm tất cả <tr> trong bảng có header: S.No | Participant Name | First Seen At | Attended Duration | Attended Percentage
+    if (!fireResp.ok)
+      return res.status(502).json({ success: false, message: `Không thể tải dữ liệu báo cáo từ Firebase: HTTP ${fireResp.status}` });
+
+    const fireData = await fireResp.json();
+
+    // Firestore trả về dạng fields: { participants: { arrayValue: { values: [...] } } }
+    const fields = fireData?.fields;
+    if (!fields)
+      return res.status(422).json({ success: false, message: "Dữ liệu báo cáo không hợp lệ" });
+
     const participants = [];
 
-    // Lấy tất cả <tr> (bỏ header)
-    const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-    const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-    const stripTags = (s) => s.replace(/<[^>]+>/g, "").replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim();
+    // Thử parse participants array từ Firestore format
+    const participantValues = fields?.participants?.arrayValue?.values || [];
 
-    let rowMatch;
-    let isFirstDataRow = true;
+    for (const item of participantValues) {
+      const f = item?.mapValue?.fields || {};
+      const name = f?.name?.stringValue || f?.participantName?.stringValue || "";
+      const pctRaw = f?.attendedPercentage?.doubleValue
+        ?? f?.attendedPercentage?.integerValue
+        ?? f?.percentage?.doubleValue
+        ?? f?.percentage?.integerValue
+        ?? null;
 
-    while ((rowMatch = rowRegex.exec(html)) !== null) {
-      const rowHtml = rowMatch[1];
-      // Bỏ qua header row (chứa <th>)
-      if (/<th/i.test(rowHtml)) continue;
-
-      const cells = [];
-      let cellMatch;
-      const cellRegexLocal = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-      while ((cellMatch = cellRegexLocal.exec(rowHtml)) !== null) {
-        cells.push(stripTags(cellMatch[1]));
-      }
-
-      // Bảng có 5 cột: S.No, Participant Name, First Seen At, Attended Duration, Attended Percentage
-      if (cells.length >= 5) {
-        const name = cells[1];
-        const percentStr = cells[4]; // "100%" hoặc "75.5%"
-        const percent = parseFloat(percentStr.replace("%", "").trim());
-
-        if (name && !isNaN(percent)) {
-          participants.push({
-            participantName: name,
-            attendedPercentage: percent,
-          });
-        }
+      if (name && pctRaw !== null) {
+        participants.push({
+          participantName: name,
+          attendedPercentage: parseFloat(pctRaw),
+        });
       }
     }
 
+    // Nếu không có participants array, thử tìm theo cấu trúc khác
+    if (participants.length === 0) {
+      // Log để debug cấu trúc thực tế
+      console.log("[parseAttendanceReport] Firebase fields keys:", Object.keys(fields));
+      console.log("[parseAttendanceReport] Raw data sample:", JSON.stringify(fireData).substring(0, 500));
+      return res.status(422).json({
+        success: false,
+        message: "Không tìm thấy dữ liệu điểm danh. Vui lòng gửi log server cho dev để kiểm tra cấu trúc Firebase.",
+        debugKeys: Object.keys(fields),
+      });
+    }
+
     if (participants.length === 0)
-      return res.status(422).json({ success: false, message: "Không tìm thấy dữ liệu điểm danh trong báo cáo. Vui lòng kiểm tra lại link." });
+      return res.status(422).json({ success: false, message: "Không tìm thấy dữ liệu điểm danh trong báo cáo." });
 
     // Lấy danh sách thành viên nhóm để leader map
     const membersRes = await pool.query(
