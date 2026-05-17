@@ -900,7 +900,6 @@ exports.getMeetingAttendances = async (req, res) => {
        LEFT JOIN "Users" u ON ma."UserId" = u."Id"
        WHERE t."GroupId" = $1
          AND t."MeetingCheckedOut" = TRUE
-         AND ma."UserId" IS NOT NULL
        GROUP BY ma."UserId", u."Name", u."AvatarUrl"
        ORDER BY "AvgPercentage" DESC`,
       [GroupId]
@@ -910,6 +909,7 @@ exports.getMeetingAttendances = async (req, res) => {
       success: true,
       data: {
         checkedOut: true,
+          meetingMeta: null,
         rows: thisRes.rows,          // điểm danh cuộc họp này
         groupStats: groupRes.rows,   // tổng kết toàn nhóm
       },
@@ -942,8 +942,8 @@ exports.uploadAttendanceCsv = async (req, res) => {
       return res.status(403).json({ success: false, message: "Bạn không phải thành viên nhóm này!" });
     if (!(await checkLeaderRole(GroupId, userId)))
       return res.status(403).json({ success: false, message: "Chỉ Trưởng nhóm hoặc Phó nhóm mới được checkout!" });
-    if (MeetingCheckedOut)
-      return res.status(400).json({ success: false, message: "Cuộc họp này đã được checkout, không thể thay đổi!" });
+    // if (MeetingCheckedOut)
+    //   return res.status(400).json({ success: false, message: "Cuộc họp này đã được checkout, không thể thay đổi!" });
 
     // Parse mappings từ body
     let mappings = [];
