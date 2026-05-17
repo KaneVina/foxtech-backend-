@@ -946,10 +946,7 @@ exports.uploadAttendanceCsv = async (req, res) => {
     //   return res.status(400).json({ success: false, message: "Cuộc họp này đã được checkout, không thể thay đổi!" });
 
     // Parse mappings từ body
-    let mappings = [];
-    try {
-      mappings = JSON.parse(req.body.mappings || "[]");
-    } catch (_) {}
+   const mappings = req.body.mappings || [];
 
     const client = await pool.connect();
     try {
