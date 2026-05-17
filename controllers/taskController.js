@@ -919,3 +919,73 @@ exports.getMeetingAttendances = async (req, res) => {
     res.status(500).json({ success: false, message: "Lỗi server" });
   }
 };
+// ══════════════════════════════════════════════════════════════════════════════
+// [POST] /:taskId/attendance-csv — Upload CSV điểm danh + checkout
+// ══════════════════════════════════════════════════════════════════════════════
+exports.uploadAttendanceCsv = async (req, res) => {
+  try {
+    const taskId = parseInt(req.params.taskId);
+    const userId = parseInt(req.user.id || req.user.Id || req.userId);
+
+    const taskRes = await pool.query(
+      `SELECT "GroupId","TaskType","MeetingCheckedOut" FROM "Tasks" WHERE "Id" = $1`,
+      [taskId]
+    );
+    if (taskRes.rows.length === 0)
+      return res.status(404).json({ success: false, message: "Task không tồn tại" });
+
+    const { GroupId, TaskType, MeetingCheckedOut } = taskRes.rows[0];
+
+    if (TaskType !== "Hội họp")
+      return res.status(400).json({ success: false, message: "Chỉ task Hội họp mới có điểm danh" });
+    if (!(await checkMembership(GroupId, userId)))
+      return res.status(403).json({ success: false, message: "Bạn không phải thành viên nhóm này!" });
+    if (!(await checkLeaderRole(GroupId, userId)))
+      return res.status(403).json({ success: false, message: "Chỉ Trưởng nhóm hoặc Phó nhóm mới được checkout!" });
+    if (MeetingCheckedOut)
+      return res.status(400).json({ success: false, message: "Cuộc họp này đã được checkout, không thể thay đổi!" });
+
+    // Parse mappings từ body
+    let mappings = [];
+    try {
+      mappings = JSON.parse(req.body.mappings || "[]");
+    } catch (_) {}
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Xóa dữ liệu cũ nếu có
+      await client.query(`DELETE FROM "MeetingAttendances" WHERE "TaskId" = $1`, [taskId]);
+
+      // Insert từng dòng
+      for (const m of mappings) {
+        const { participantName, userId: mappedUserId, attendedPercentage } = m;
+        await client.query(
+          `INSERT INTO "MeetingAttendances"
+             ("TaskId","UserId","ParticipantName","AttendedPercentage")
+           VALUES ($1,$2,$3,$4)`,
+          [taskId, mappedUserId || null, participantName, attendedPercentage ?? 0]
+        );
+      }
+
+      // Đánh dấu checkout
+      await client.query(
+        `UPDATE "Tasks" SET "MeetingCheckedOut" = TRUE WHERE "Id" = $1`,
+        [taskId]
+      );
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    res.json({ success: true, message: "Checkout điểm danh thành công!" });
+  } catch (err) {
+    console.error("Lỗi uploadAttendanceCsv:", err);
+    res.status(500).json({ success: false, message: "Lỗi server khi checkout điểm danh" });
+  }
+};
