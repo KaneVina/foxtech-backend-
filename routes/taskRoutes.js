@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const taskController = require("../controllers/taskController");
 const { verifyToken } = require("../middleware/authMiddleware");
+const multer = require("multer");
+const upload = multer();
 
 router.get("/my-tasks", verifyToken, taskController.getMyAllTasks);
 router.get("/group/:groupId", verifyToken, taskController.getGroupTasks);
@@ -17,6 +19,6 @@ router.post("/:taskId/options", verifyToken, taskController.addPollOption);
 router.put("/:taskId/close-poll", verifyToken, taskController.closePoll);
 router.post("/:taskId/remind", verifyToken, taskController.remindTask);
 router.put("/:taskId/attendance-report", verifyToken, taskController.updateAttendanceReport);
-router.post("/:taskId/attendance-csv", verifyToken, taskController.uploadAttendanceCsv);
+router.post("/:taskId/attendance-csv", verifyToken, upload.single("file"), taskController.uploadAttendanceCsv);
 router.get("/:taskId/meeting-attendances", verifyToken, taskController.getMeetingAttendances);
 module.exports = router;
