@@ -15,8 +15,9 @@ router.put("/:taskId/pin", verifyToken, taskController.togglePinTask);
 router.post("/:taskId/vote", verifyToken, taskController.votePoll);
 router.post("/:taskId/options", verifyToken, taskController.addPollOption);
 router.put("/:taskId/close-poll", verifyToken, taskController.closePoll);
-// [NEW] Nhắc nhở nhiệm vụ — chỉ leader/action leader
 router.post("/:taskId/remind", verifyToken, taskController.remindTask);
-// [NEW] Cập nhật link báo cáo điểm danh (Hội họp)
 router.put("/:taskId/attendance-report", verifyToken, taskController.updateAttendanceReport);
+router.get("/:taskId/attendance-report/parse", verifyToken, taskController.parseAttendanceReport);
+router.post("/:taskId/checkout", verifyToken, taskController.checkoutMeeting);
+router.get("/:taskId/meeting-attendances", verifyToken, taskController.getMeetingAttendances);
 module.exports = router;

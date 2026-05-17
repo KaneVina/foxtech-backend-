@@ -845,3 +845,260 @@ exports.updateAttendanceReport = async (req, res) => {
     res.status(500).json({ success: false, message: "Lỗi server" });
   }
 };
+
+// ══════════════════════════════════════════════════════════════════════════════
+// [GET] /:taskId/attendance-report/parse
+// Backend proxy fetch HTML report → parse bảng Participant's List
+// Tránh CORS khi frontend fetch trực tiếp
+// ══════════════════════════════════════════════════════════════════════════════
+exports.parseAttendanceReport = async (req, res) => {
+  try {
+    const taskId = parseInt(req.params.taskId);
+    const userId = parseInt(req.user.id || req.user.Id || req.userId);
+
+    const taskRes = await pool.query(
+      `SELECT "GroupId","TaskType","AttendanceReportUrl","MeetingCheckedOut"
+       FROM "Tasks" WHERE "Id" = $1`,
+      [taskId]
+    );
+    if (taskRes.rows.length === 0)
+      return res.status(404).json({ success: false, message: "Task không tồn tại" });
+
+    const { GroupId, TaskType, AttendanceReportUrl, MeetingCheckedOut } = taskRes.rows[0];
+
+    if (TaskType !== "Hội họp")
+      return res.status(400).json({ success: false, message: "Chỉ task Hội họp mới có báo cáo điểm danh" });
+    if (!(await checkMembership(GroupId, userId)))
+      return res.status(403).json({ success: false, message: "Bạn không phải thành viên nhóm này!" });
+    if (!(await checkLeaderRole(GroupId, userId)))
+      return res.status(403).json({ success: false, message: "Chỉ Trưởng nhóm hoặc Phó nhóm mới được parse báo cáo!" });
+    if (!AttendanceReportUrl)
+      return res.status(400).json({ success: false, message: "Task chưa có link báo cáo điểm danh" });
+    if (MeetingCheckedOut)
+      return res.status(400).json({ success: false, message: "Cuộc họp này đã được checkout rồi" });
+
+    // Fetch HTML từ URL
+    const fetch = require("node-fetch");
+    const response = await fetch(AttendanceReportUrl, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      timeout: 10000,
+    });
+    if (!response.ok)
+      return res.status(502).json({ success: false, message: `Không thể tải báo cáo: HTTP ${response.status}` });
+
+    const html = await response.text();
+
+    // Parse bảng Participant's List
+    // Tìm tất cả <tr> trong bảng có header: S.No | Participant Name | First Seen At | Attended Duration | Attended Percentage
+    const participants = [];
+
+    // Lấy tất cả <tr> (bỏ header)
+    const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+    const stripTags = (s) => s.replace(/<[^>]+>/g, "").replace(/&amp;/g,"&").replace(/&nbsp;/g," ").trim();
+
+    let rowMatch;
+    let isFirstDataRow = true;
+
+    while ((rowMatch = rowRegex.exec(html)) !== null) {
+      const rowHtml = rowMatch[1];
+      // Bỏ qua header row (chứa <th>)
+      if (/<th/i.test(rowHtml)) continue;
+
+      const cells = [];
+      let cellMatch;
+      const cellRegexLocal = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+      while ((cellMatch = cellRegexLocal.exec(rowHtml)) !== null) {
+        cells.push(stripTags(cellMatch[1]));
+      }
+
+      // Bảng có 5 cột: S.No, Participant Name, First Seen At, Attended Duration, Attended Percentage
+      if (cells.length >= 5) {
+        const name = cells[1];
+        const percentStr = cells[4]; // "100%" hoặc "75.5%"
+        const percent = parseFloat(percentStr.replace("%", "").trim());
+
+        if (name && !isNaN(percent)) {
+          participants.push({
+            participantName: name,
+            attendedPercentage: percent,
+          });
+        }
+      }
+    }
+
+    if (participants.length === 0)
+      return res.status(422).json({ success: false, message: "Không tìm thấy dữ liệu điểm danh trong báo cáo. Vui lòng kiểm tra lại link." });
+
+    // Lấy danh sách thành viên nhóm để leader map
+    const membersRes = await pool.query(
+      `SELECT u."Id", u."Name", u."AvatarUrl", u."StudentId"
+       FROM "GroupMembers" gm
+       JOIN "Users" u ON gm."UserId" = u."Id"
+       WHERE gm."GroupId" = $1
+       ORDER BY u."Name"`,
+      [GroupId]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        participants,
+        members: membersRes.rows,
+      },
+    });
+  } catch (err) {
+    console.error("Lỗi parseAttendanceReport:", err);
+    res.status(500).json({ success: false, message: "Lỗi server khi parse báo cáo: " + err.message });
+  }
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// [POST] /:taskId/checkout
+// Lưu kết quả điểm danh + xóa MeetLink + đánh dấu đã checkout
+// Body: { mappings: [{ participantName, userId, attendedPercentage }] }
+// ══════════════════════════════════════════════════════════════════════════════
+exports.checkoutMeeting = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const taskId = parseInt(req.params.taskId);
+    const userId = parseInt(req.user.id || req.user.Id || req.userId);
+    const { mappings } = req.body; // array of { participantName, userId, attendedPercentage }
+
+    if (!mappings || !Array.isArray(mappings) || mappings.length === 0)
+      return res.status(400).json({ success: false, message: "Thiếu dữ liệu mappings" });
+
+    const taskRes = await pool.query(
+      `SELECT "GroupId","TaskType","MeetingCheckedOut" FROM "Tasks" WHERE "Id" = $1`,
+      [taskId]
+    );
+    if (taskRes.rows.length === 0)
+      return res.status(404).json({ success: false, message: "Task không tồn tại" });
+
+    const { GroupId, TaskType, MeetingCheckedOut } = taskRes.rows[0];
+
+    if (TaskType !== "Hội họp")
+      return res.status(400).json({ success: false, message: "Chỉ task Hội họp mới có thể checkout" });
+    if (MeetingCheckedOut)
+      return res.status(400).json({ success: false, message: "Cuộc họp này đã được checkout rồi" });
+    if (!(await checkMembership(GroupId, userId)))
+      return res.status(403).json({ success: false, message: "Bạn không phải thành viên nhóm này!" });
+    if (!(await checkLeaderRole(GroupId, userId)))
+      return res.status(403).json({ success: false, message: "Chỉ Trưởng nhóm hoặc Phó nhóm mới được checkout!" });
+
+    await client.query("BEGIN");
+
+    // Lưu từng mapping vào MeetingAttendances
+    for (const m of mappings) {
+      const memberUserId = m.userId ? parseInt(m.userId) : null;
+      const pct = parseFloat(m.attendedPercentage) || 0;
+      const pName = String(m.participantName || "").trim();
+      if (!pName) continue;
+
+      await client.query(
+        `INSERT INTO "MeetingAttendances"
+           ("TaskId","UserId","ParticipantName","AttendedPercentage","CheckedOutBy","CheckedOutAt")
+         VALUES ($1,$2,$3,$4,$5,NOW())
+         ON CONFLICT ("TaskId","UserId") DO UPDATE
+           SET "ParticipantName"    = EXCLUDED."ParticipantName",
+               "AttendedPercentage" = EXCLUDED."AttendedPercentage",
+               "CheckedOutBy"       = EXCLUDED."CheckedOutBy",
+               "CheckedOutAt"       = NOW()`,
+        [taskId, memberUserId, pName, pct, userId]
+      );
+    }
+
+    // Đánh dấu checkout + xóa MeetLink
+    await client.query(
+      `UPDATE "Tasks"
+       SET "MeetingCheckedOut" = TRUE,
+           "MeetingCheckedOutAt" = NOW(),
+           "MeetLink" = NULL
+       WHERE "Id" = $1`,
+      [taskId]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({ success: true, message: "Checkout thành công! Link Google Meet đã được xóa." });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Lỗi checkoutMeeting:", err);
+    res.status(500).json({ success: false, message: "Lỗi server khi checkout: " + err.message });
+  } finally {
+    client.release();
+  }
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// [GET] /:taskId/meeting-attendances
+// Lấy kết quả điểm danh của task + tổng kết toàn nhóm
+// ══════════════════════════════════════════════════════════════════════════════
+exports.getMeetingAttendances = async (req, res) => {
+  try {
+    const taskId = parseInt(req.params.taskId);
+    const userId = parseInt(req.user.id || req.user.Id || req.userId);
+
+    const taskRes = await pool.query(
+      `SELECT "GroupId","TaskType","MeetingCheckedOut" FROM "Tasks" WHERE "Id" = $1`,
+      [taskId]
+    );
+    if (taskRes.rows.length === 0)
+      return res.status(404).json({ success: false, message: "Task không tồn tại" });
+
+    const { GroupId, TaskType, MeetingCheckedOut } = taskRes.rows[0];
+
+    if (TaskType !== "Hội họp")
+      return res.status(400).json({ success: false, message: "Chỉ task Hội họp mới có bảng điểm danh" });
+    if (!(await checkMembership(GroupId, userId)))
+      return res.status(403).json({ success: false, message: "Bạn không phải thành viên nhóm này!" });
+    if (!MeetingCheckedOut)
+      return res.json({ success: true, data: { checkedOut: false, rows: [], groupStats: [] } });
+
+    // Kết quả cuộc họp này
+    const thisRes = await pool.query(
+      `SELECT ma."UserId", ma."ParticipantName", ma."AttendedPercentage",
+              u."Name", u."AvatarUrl"
+       FROM "MeetingAttendances" ma
+       LEFT JOIN "Users" u ON ma."UserId" = u."Id"
+       WHERE ma."TaskId" = $1
+       ORDER BY ma."AttendedPercentage" DESC`,
+      [taskId]
+    );
+
+    // Tổng kết toàn nhóm: trung bình % mỗi thành viên qua tất cả cuộc họp đã checkout
+    const groupRes = await pool.query(
+      `SELECT
+         ma."UserId",
+         u."Name",
+         u."AvatarUrl",
+         ROUND(AVG(ma."AttendedPercentage")::numeric, 1) AS "AvgPercentage",
+         COUNT(DISTINCT ma."TaskId")::int                AS "AttendedMeetings",
+         (SELECT COUNT(*) FROM "Tasks"
+          WHERE "GroupId" = $1
+            AND "TaskType" = 'Hội họp'
+            AND "MeetingCheckedOut" = TRUE)::int         AS "TotalMeetings"
+       FROM "MeetingAttendances" ma
+       JOIN "Tasks" t ON ma."TaskId" = t."Id"
+       LEFT JOIN "Users" u ON ma."UserId" = u."Id"
+       WHERE t."GroupId" = $1
+         AND t."MeetingCheckedOut" = TRUE
+         AND ma."UserId" IS NOT NULL
+       GROUP BY ma."UserId", u."Name", u."AvatarUrl"
+       ORDER BY "AvgPercentage" DESC`,
+      [GroupId]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        checkedOut: true,
+        rows: thisRes.rows,          // điểm danh cuộc họp này
+        groupStats: groupRes.rows,   // tổng kết toàn nhóm
+      },
+    });
+  } catch (err) {
+    console.error("Lỗi getMeetingAttendances:", err);
+    res.status(500).json({ success: false, message: "Lỗi server" });
+  }
+};
