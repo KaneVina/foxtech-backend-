@@ -143,7 +143,30 @@ async function fullReset(scheduleId, pushId) {
     [scheduleId],
   );
 }
+async function assertGroupMember(taskId, userId) {
+  const taskRes = await pool.query(
+    `SELECT "GroupId" FROM "Tasks" WHERE "Id" = $1`,
+    [taskId],
+  );
+  if (!taskRes.rows.length) {
+    const err = new Error("Task không tồn tại");
+    err.status = 404;
+    throw err;
+  }
+  const groupId = taskRes.rows[0].GroupId;
 
+  const memRes = await pool.query(
+    `SELECT "GroupRole" FROM "GroupMembers" WHERE "GroupId" = $1 AND "UserId" = $2`,
+    [groupId, userId],
+  );
+  if (!memRes.rows.length) {
+    const err = new Error("Bạn không phải thành viên nhóm này");
+    err.status = 403;
+    throw err;
+  }
+  const groupRole = (memRes.rows[0].GroupRole || "").toLowerCase();
+  return { groupId, groupRole };
+}
 // ─────────────────────────────────────────────────────────────
 // HELPER NỘI BỘ: getReviewerRole
 // ─────────────────────────────────────────────────────────────
@@ -2081,35 +2104,6 @@ exports.assignSonarResult = async (req, res) => {
   }
 };
 
-// ═══════════════════════════════════════════════════════════════
-// FILE NÀY CHỨA 2 HÀM CẦN THAY THẾ TRONG projectController.js
-//
-// 1. handleSonarQubeWebhook  — tìm và thay toàn bộ hàm cũ
-// 2. assignSonarByHash       — tìm và thay toàn bộ hàm cũ
-//
-// THAY ĐỔI SO VỚI BẢN CŨ:
-//   [handleSonarQubeWebhook]
-//   - Fix regex: bắt được TC001, TC1.2, TC2.10 (cũ bỏ sót hết)
-//   - Fix commitHash: thêm fallback sonar.scm.revision
-//   - Auto-match UC: exact branch → extract UCID từ branch → null
-//   - Notification rõ hơn: báo khi chưa gán được UC
-//
-//   [assignSonarByHash]
-//   - Fix LIKE '%hash%' → LIKE 'hash%' (prefix match)
-//     Lý do: git hash luôn là prefix, LIKE %hash% có thể khớp nhầm
-//   - Cảnh báo log khi gán đè lên UC khác
-// ═══════════════════════════════════════════════════════════════
-
-// ─────────────────────────────────────────────────────────────
-// HELPER nội bộ — extract UCID từ branch name
-// Test cases:
-//   'TC1.2'               → 'TC1.2'
-//   'feature/TC001-login' → 'TC001'
-//   'TC2.10-payment'      → 'TC2.10'
-//   'hotfix/TC3.1'        → 'TC3.1'
-//   'main'                → null
-//   null                  → null
-// ─────────────────────────────────────────────────────────────
 function extractUCIDFromBranch(branch) {
   if (!branch) return null;
   const UCID_REGEX = /\b(TC\d+(?:\.\d+)?)\b/i;
@@ -2117,9 +2111,7 @@ function extractUCIDFromBranch(branch) {
   return match ? match[1].toUpperCase() : null;
 }
 
-// ═══════════════════════════════════════════════════════════════
 // HÀM 1: handleSonarQubeWebhook
-// ═══════════════════════════════════════════════════════════════
 exports.handleSonarQubeWebhook = async (req, res) => {
   try {
     const rawPayload = JSON.stringify(req.body);
@@ -2311,9 +2303,7 @@ exports.handleSonarQubeWebhook = async (req, res) => {
 };
 
 
-// ═══════════════════════════════════════════════════════════════
 // HÀM 2: assignSonarByHash
-// ═══════════════════════════════════════════════════════════════
 exports.assignSonarByHash = async (req, res) => {
   try {
     const taskId     = parseInt(req.params.taskId);
@@ -2379,5 +2369,118 @@ exports.assignSonarByHash = async (req, res) => {
   } catch (err) {
     console.error("assignSonarByHash:", err);
     res.status(500).json({ success: false, message: "Lỗi server" });
+  }
+};
+// ═══════════════════════════════════════════════════════════════
+// RESOURCE LINKS
+// ═══════════════════════════════════════════════════════════════
+
+exports.getResourceLinks = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const userId = req.user.id || req.user.Id || req.userId;
+
+    await assertGroupMember(taskId, userId);
+
+    const result = await pool.query(
+      `SELECT "Id", "TaskId", "Section", "Name", "Url", "Note",
+              "CreatedById", "CreatedByName", "CreatedAt"
+       FROM "TaskResourceLinks"
+       WHERE "TaskId" = $1
+       ORDER BY "Section", "CreatedAt" ASC`,
+      [taskId],
+    );
+
+    return res.json({ success: true, data: result.rows });
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ success: false, message: err.message });
+    }
+    console.error("getResourceLinks:", err);
+    return res.status(500).json({ success: false, message: "Lỗi server" });
+  }
+};
+
+exports.createResourceLink = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const userId = req.user.id || req.user.Id || req.userId;
+    const { section, name, url, note } = req.body;
+
+    if (!section || !["docs", "env", "other"].includes(section)) {
+      return res.status(400).json({
+        success: false,
+        message: "section không hợp lệ (docs | env | other)",
+      });
+    }
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: "Tên link không được bỏ trống" });
+    }
+    if (!url || !url.trim()) {
+      return res.status(400).json({ success: false, message: "URL không được bỏ trống" });
+    }
+
+    await assertGroupMember(taskId, userId);
+
+    const userRes = await pool.query(
+      `SELECT "Name" FROM "Users" WHERE "Id" = $1`,
+      [userId],
+    );
+    const createdByName = userRes.rows[0]?.Name || "Unknown";
+
+    const ins = await pool.query(
+      `INSERT INTO "TaskResourceLinks"
+         ("TaskId", "Section", "Name", "Url", "Note", "CreatedById", "CreatedByName", "CreatedAt")
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       RETURNING *`,
+      [taskId, section, name.trim(), url.trim(), note?.trim() || null, userId, createdByName],
+    );
+
+    return res.status(201).json({ success: true, data: ins.rows[0] });
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ success: false, message: err.message });
+    }
+    console.error("createResourceLink:", err);
+    return res.status(500).json({ success: false, message: "Lỗi server" });
+  }
+};
+
+exports.deleteResourceLink = async (req, res) => {
+  try {
+    const { taskId, linkId } = req.params;
+    const userId = req.user.id || req.user.Id || req.userId;
+
+    const { groupRole } = await assertGroupMember(taskId, userId);
+    const systemRole = (req.user.role || req.user.Role || "").toLowerCase();
+
+    const isLeader = groupRole === "leader" || systemRole === "admin";
+    const isAL = groupRole === "action leader";
+
+    if (!isLeader && !isAL) {
+      return res.status(403).json({
+        success: false,
+        message: "Chỉ Leader và Action Leader mới được xóa link!",
+      });
+    }
+
+    const del = await pool.query(
+      `DELETE FROM "TaskResourceLinks"
+       WHERE "Id" = $1 AND "TaskId" = $2
+       RETURNING "Id"`,
+      [linkId, taskId],
+    );
+
+    if (!del.rows.length) {
+      return res.status(404).json({ success: false, message: "Không tìm thấy link" });
+    }
+
+    return res.json({ success: true, message: "Đã xóa link" });
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ success: false, message: err.message });
+    }
+    console.error("deleteResourceLink:", err);
+    return res.status(500).json({ success: false, message: "Lỗi server" });
   }
 };

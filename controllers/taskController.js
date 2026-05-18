@@ -946,7 +946,7 @@ exports.uploadAttendanceCsv = async (req, res) => {
     //   return res.status(400).json({ success: false, message: "Cuộc họp này đã được checkout, không thể thay đổi!" });
 
     // Parse mappings từ body
-   const mappings = req.body.mappings || [];
+   const mappings = (req.body.mappings || []).filter(m => m.participantName);
 
     const client = await pool.connect();
     try {
@@ -958,6 +958,7 @@ exports.uploadAttendanceCsv = async (req, res) => {
       // Insert từng dòng
       for (const m of mappings) {
         const { participantName, userId: mappedUserId, attendedPercentage } = m;
+        if (!participantName) continue;
         await client.query(
           `INSERT INTO "MeetingAttendances"
              ("TaskId","UserId","ParticipantName","AttendedPercentage")
